@@ -52,9 +52,10 @@ fn main() {
     let test_set = read_csv("data/ag_news/test.csv").expect("cannot load test set");
     let train_set = read_csv("data/ag_news/train.csv").expect("cannot load train set");
     let k = 5; 
-
+    let train_size = 30000;
     println!("number samples in test set {}", &test_set.len());
     println!("number of samples in train set {}", &train_set.len());
+    println!("k: {}, train size: {}", k, train_size);
     
     let train_set_shared = Arc::new(train_set);
 
@@ -69,16 +70,14 @@ fn main() {
     let test_case = "Private US lander destroyed during reentry after failed mission to moon, company says";
     println!("input text: {}", test_case);
     println!("target class: {}", labels[target_klass - 1]);
-    let cx1 = compress(&test_case).len();
-    let mut distances = vec![];
+    let cx1 = compress(test_case).len();
 
-    let dist_shared = std::sync::Arc::new(std::sync::Mutex::new(distances));
+    let dist_shared = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
     let mut handles = vec![];
 
     let train_set_shared_outer = Arc::clone(&train_set_shared);
 
-
-    for i in 0..30000 {
+    for i in 0..train_size {
         let dist_shared_clone = dist_shared.clone();
         let train_set_shared_clone = Arc::clone(&train_set_shared);
         let handle = std::thread::spawn(move || {
@@ -92,7 +91,6 @@ fn main() {
             let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
             let mut dist = dist_shared_clone.lock().unwrap();
             dist.push((ncd, train_text));
-            // distances.push((ncd, train_text));
         });
         handles.push(handle);
     }
