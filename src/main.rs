@@ -8,7 +8,6 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
 use std::sync::{mpsc, Arc};
-use std::thread;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +51,7 @@ fn main() {
     let labels = ["World", "Sports", "Business", "Sci/Tech"];
     let test_set = read_csv("data/ag_news/test.csv").expect("cannot load test set");
     let train_set = read_csv("data/ag_news/train.csv").expect("cannot load train set");
-    let k = 3; 
+    let k = 5; 
 
     println!("number samples in test set {}", &test_set.len());
     println!("number of samples in train set {}", &train_set.len());
@@ -73,21 +72,40 @@ fn main() {
     let cx1 = compress(&test_case).len();
     let mut distances = vec![];
 
-    for i in 0..10000 {
-        let train_set_shared_clone = Arc::clone(&train_set_shared);
-        let train_label = train_set_shared_clone[i].0.clone();
-        let train_text = train_set_shared_clone[i].1.clone();
+    let dist_shared = std::sync::Arc::new(std::sync::Mutex::new(distances));
+    let mut handles = vec![];
 
-        let cx2 = compress(&train_text).len();
-        let combined = format!("{} {}", test_case, train_text);
-        let cx1x2 = compress(&combined).len();
-        let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
-        distances.push((ncd, train_text));
+    let train_set_shared_outer = Arc::clone(&train_set_shared);
+
+
+    for i in 0..30000 {
+        let dist_shared_clone = dist_shared.clone();
+        let train_set_shared_clone = Arc::clone(&train_set_shared);
+        let handle = std::thread::spawn(move || {
+            // let train_set_shared_clone = Arc::clone(&train_set_shared);
+            let train_label = train_set_shared_clone[i].0.clone();
+            let train_text = train_set_shared_clone[i].1.clone();
+
+            let cx2 = compress(&train_text).len();
+            let combined = format!("{} {}", test_case, train_text);
+            let cx1x2 = compress(&combined).len();
+            let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
+            let mut dist = dist_shared_clone.lock().unwrap();
+            dist.push((ncd, train_text));
+            // distances.push((ncd, train_text));
+        });
+        handles.push(handle);
     }
 
-    let mut indices_with_distances: Vec<_> = distances.iter().enumerate().collect();
+    for handle in handles {
+        handle.join().expect("could not join thread");
+    }
+
+    let dist = dist_shared.lock().unwrap();
+
+    let mut indices_with_distances: Vec<_> = dist.iter().enumerate().collect();
     indices_with_distances.sort_by(|&(_, dist_a), &(_, dist_b)| dist_a.partial_cmp(dist_b).unwrap());
-    let top_classes: Vec<_> = indices_with_distances.iter().take(k).map(|&(idx, _)| train_set_shared[idx].0).collect();
+    let top_classes: Vec<_> = indices_with_distances.iter().take(k).map(|&(idx, _)| train_set_shared_outer[idx].0).collect();
     println!("top classes {:?}", top_classes);
 
     let mut counts = HashMap::new();
