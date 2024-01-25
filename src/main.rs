@@ -1,13 +1,11 @@
 use std::io::Write;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-// use std::io::prelude::*;
-// use ndarray::Array1;
-use csv::{Reader, ReaderBuilder};
+use csv::ReaderBuilder;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
