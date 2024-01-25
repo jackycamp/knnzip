@@ -1,0 +1,106 @@
+use std::io::Write;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+// use std::io::prelude::*;
+// use ndarray::Array1;
+use csv::{Reader, ReaderBuilder};
+use serde::Deserialize;
+use std::error::Error;
+use std::fs::File;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::collections::HashMap;
+
+#[derive(Debug, Deserialize)]
+struct Record {
+    label: i32,
+    title: String,
+    desc: String,
+}
+
+fn compress(data: &str) -> Vec<u8> {
+    let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    e.write_all(data.as_bytes()).unwrap();
+    e.finish().unwrap()
+}
+
+fn read_csv(path: &str) -> Result<Vec<(i32, String)>, Box<dyn Error>> {
+    let file = File::open(path)?;
+    println!("reading csv: {}", path);
+    
+    let mut rdr = ReaderBuilder::new().has_headers(false).from_reader(file);
+    let mut data: Vec<(i32, String)> = Vec::new();
+
+    for result in rdr.deserialize() {
+        match result {
+            Ok(_) => {
+                let record: Record = result?;
+                data.push((record.label, format!("{},{}", record.title, record.desc)));
+                // data.push((record.label, record.title));
+            },
+            Err(e) => println!("{}", e),
+        }
+    }
+    // println!("data: {:?}", data);
+    // println!("len: {:?}", data.len());
+    Ok(data)
+}
+
+
+fn main() {
+    // NOTE: original labels are 1, 2, 3, 4
+    let labels = ["World", "Sports", "Business", "Sci/Tech"];
+    let test_set = read_csv("data/ag_news/test.csv").expect("cannot load test set");
+    let train_set = read_csv("data/ag_news/train.csv").expect("cannot load train set");
+    let k = 3; 
+
+    println!("number samples in test set {}", &test_set.len());
+    println!("number of samples in train set {}", &train_set.len());
+    
+    let train_set_shared = Arc::new(train_set);
+
+    // let test_case = "EBay gets into rentals EBay plans to buy the apartment and home rental service Rent.com for $415 million, adding to its already exhaustive breadth of offerings.";
+    // let target_klass = 3;
+    // let test_case = "Japan’s Bonds Decline on Rate Bets, HK Stocks Gain: Markets Wrap";
+    let target_klass = 2;
+    let test_case = "Adrian Beltré, Todd Helton and Joe Mauer elected to baseball’s Hall of Fame";
+    let target_klass = 2;
+    let test_case = "Bucks fire coach Adrian Griffin after 43 games despite having one of NBA’s top records";
+    let target_klass = 4;
+    let test_case = "Private US lander destroyed during reentry after failed mission to moon, company says";
+    println!("input text: {}", test_case);
+    println!("target class: {}", labels[target_klass - 1]);
+    let cx1 = compress(&test_case).len();
+    let mut distances = vec![];
+
+    for i in 0..10000 {
+        let train_set_shared_clone = Arc::clone(&train_set_shared);
+        let train_label = train_set_shared_clone[i].0.clone();
+        let train_text = train_set_shared_clone[i].1.clone();
+
+        let cx2 = compress(&train_text).len();
+        let combined = format!("{} {}", test_case, train_text);
+        let cx1x2 = compress(&combined).len();
+        let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
+        distances.push((ncd, train_text));
+    }
+
+    let mut indices_with_distances: Vec<_> = distances.iter().enumerate().collect();
+    indices_with_distances.sort_by(|&(_, dist_a), &(_, dist_b)| dist_a.partial_cmp(dist_b).unwrap());
+    let top_classes: Vec<_> = indices_with_distances.iter().take(k).map(|&(idx, _)| train_set_shared[idx].0).collect();
+    println!("top classes {:?}", top_classes);
+
+    let mut counts = HashMap::new();
+    for class in &top_classes {
+        *counts.entry(class).or_insert(0) += 1;
+    }
+
+    let predict_class = counts
+        .into_iter()
+        .max_by_key(|&(_, count)| count)
+        .map(|(class, _)| *class)
+        .expect("no class found!");
+    let predict_class_idx = (predict_class - 1) as usize;
+    println!("predicted class: {}, {}", labels[predict_class_idx], predict_class);
+
+}
