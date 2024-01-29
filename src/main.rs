@@ -178,6 +178,7 @@ fn main() {
 
     if let Some(test_path) = args.test_path {
         println!("eval mode");
+        // TODO: could thread this..
         let mut correct = 0;
         let test_set = read_csv(&test_path, Some(args.num_test_samples)).expect("cannot load test set");
         let num_samples = test_set.len();
