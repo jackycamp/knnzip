@@ -47,10 +47,35 @@ This gives us a "distance matrix" which we will use to perform K-Nearest-Neighbo
 Sounds like a for-loop to me ;).
 
 ## Performance
-TODO
+> Keep in mind, all of this was done on a 2022 M1 Macbook pro.
+
+TODO:
 
 ## Evaluation
 
 NOTES:
 using the agnews dataset, the SCI/Tech training samples are too loose. A significant number of samples labeled as sci/tech should actually be labeled something else.
 this causes the classifier to usually default to sci/tech when taking the top k.
+
+## Check it out yourself
+
+```
+# do some clonin'
+git clone https://github.com/jackycamp/knnzip.git
+cd knnzip
+
+# do some buildin'
+cargo build --release
+
+# do some data downloadin'
+mkdir -p data/ag_news
+wget -P data/ag_news/train.csv https://raw.githubusercontent.com/mhjabreel/CharCnn_Keras/master/data/ag_news_csv/train.csv
+wget -P data/ag_news/test.csv https://raw.githubusercontent.com/mhjabreel/CharCnn_Keras/master/data/ag_news_csv/test.csv 
+
+# for a single sample
+./target/release/knnzip --test-sample "Earth's Forces Are Causing This Massive Plate to Split in Two"
+
+# or for all of the test samples in test.csv
+./target/release/knnzip --test-path data/ag_news/test.csv
+
+```
