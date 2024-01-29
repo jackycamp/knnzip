@@ -43,6 +43,7 @@ fn read_csv(path: &str, limit: Option<usize>) -> Result<Vec<(i32, String)>, Box<
     Ok(data)
 }
 
+// poor-man's arg parser
 #[derive(Debug)]
 struct Args {
     k: usize,
@@ -92,6 +93,9 @@ impl Args {
             if "--num-test-samples" == argument {
                 args.num_test_samples = env_args[index + 1].parse::<usize>().expect("cannot parse arg as usize");
             }
+            if "--batch-size" == argument {
+                args.batch_size = env_args[index + 1].parse::<usize>().expect("cannot parse arg as usize");
+            }
         }
         args
     }
@@ -99,9 +103,16 @@ impl Args {
     pub fn print_help(&self) {
         println!("knnzip");
         println!("usage: knnzip [OPTIONS]");
-        println!("for example: knnzip --test-sample \"Earth's Forces Are Causing This Massive Plate to Split in Two.\"");
-        println!("--train-path - Path to a training dataset (must be a csv)");
-        println!("--test-path - Path to a test dataset (must be a csv)");
+        println!("--train-path: Path to a training dataset (must be a csv)");
+        println!("--test-path: Path to a test dataset (must be a csv)");
+        println!("--k: number of samples to take when performing k-nearest-neighbors");
+        println!("--test-sample: a string to perform text classification on");
+        println!("--num-test-samples: number of test samples to consider when in eval mode");
+        println!("--batch-size: size of training batch\n");
+        println!("example:");
+        println!("knnzip --test-sample \"Earth's Forces Are Causing This Massive Plate to Split in Two.\"\n");
+        println!("if --test-path is provided, then the script will be executed in eval mode");
+        println!("otherwise, it will execute on a single prediction sample");
     }
 }
 
@@ -160,7 +171,6 @@ fn main() {
         args.print_help();
         return;
     }
-    println!("args: {:?}", args);
     // NOTE: original labels are 1, 2, 3, 4
     let labels = ["World", "Sports", "Business", "Sci/Tech"];
     let train_set = read_csv("data/ag_news/train.csv", Some(args.train_samples as usize)).expect("cannot load train set");
@@ -185,7 +195,6 @@ fn main() {
         return;
     }
     println!("single prediction mode");
-
     let predicted_class = predict_single(&args.test_sample, train_set_arc, args.batch_size, args.k);
     let predicted_class_idx = predicted_class - 1;
     println!("predicted class: {} (class idx {})", labels[predicted_class_idx as usize], predicted_class);
