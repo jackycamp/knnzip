@@ -41,8 +41,10 @@ Where C(xy) is the compressed length of combining x and y.
 
 The algorithm is awesomely simple.
 
-For a string you want to classify x, and each labeled sample y, you can build an NCD(x,y) distance matrix and then perform K nearest neighbors to classify.
+Let x be a string you want to classify. Let y be a labeled training sample. We compute NCD(x,y) for each y in the training set. 
+This gives us a "distance matrix" which we will use to perform K-Nearest-Neighbors on to classify.
 
+Sounds like a for-loop to me ;).
 
 ## Evaluation
 
