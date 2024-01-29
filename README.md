@@ -31,9 +31,11 @@ Since you can approximate K(x) then you can approximate the differences or dista
 
 Which brings us to a computable distance of information, Normalized Compression Distance (NCD).
 
+```
         C(xy) - min(C(x), C(y))
 NCD =    --------------------
             max(C(x), C(y))
+```
 
 Where C(xy) is the compressed length of combining x and y.
 
