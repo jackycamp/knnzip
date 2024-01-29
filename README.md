@@ -46,6 +46,9 @@ This gives us a "distance matrix" which we will use to perform K-Nearest-Neighbo
 
 Sounds like a for-loop to me ;).
 
+## Performance
+TODO
+
 ## Evaluation
 
 NOTES:
