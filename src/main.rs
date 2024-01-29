@@ -5,7 +5,7 @@ use csv::ReaderBuilder;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +23,6 @@ fn compress(data: &str) -> Vec<u8> {
 
 fn read_csv(path: &str, limit: Option<usize>) -> Result<Vec<(i32, String)>, Box<dyn Error>> {
     let file = File::open(path)?;
-    println!("reading csv: {}", path);
     let limit = limit.unwrap_or(1000);
     
     let mut rdr = ReaderBuilder::new().has_headers(false).from_reader(file);
@@ -52,6 +51,7 @@ struct Args {
     train_path: String,
     test_path: Option<String>,
     test_sample: String,
+    num_test_samples: usize,
     help: bool,
 }
 
@@ -64,7 +64,8 @@ impl Args {
             train_path: "data/ag_news/train.csv".to_string(),
             test_path: None,
             test_sample: "2 Magnificent Artificial Intelligence (AI) Growth Stocks Set to Join Apple and Microsoft in the $3 Trillion Club by 2030".to_string(),
-            help: false
+            help: false,
+            num_test_samples: 1000,
         }
     }
 
@@ -76,16 +77,21 @@ impl Args {
             if "--help" == argument || "-h" == argument {
                 args.help = true;
             }
-            if "--train_path" == argument {
+            if "--train-path" == argument {
                 args.train_path = env_args[index + 1].to_string();
             }
-            if "--test_path" == argument {
+            if "--test-path" == argument {
                 args.test_path = Some(env_args[index + 1].to_string());
             }
             if "--k" == argument {
-                args.k = env_args[index + 1].parse::<usize>().expect("cannot parse");
+                args.k = env_args[index + 1].parse::<usize>().expect("cannot parse arg as i32");
             }
-            println!("Arg: {}: {}", index + 1, argument);
+            if "--test-sample" == argument {
+                args.test_sample = env_args[index + 1].to_string();
+            }
+            if "--num-test-samples" == argument {
+                args.num_test_samples = env_args[index + 1].parse::<usize>().expect("cannot parse arg as usize");
+            }
         }
         args
     }
@@ -93,10 +99,58 @@ impl Args {
     pub fn print_help(&self) {
         println!("knnzip");
         println!("usage: knnzip [OPTIONS]");
-        println!("for example: knnzip --test_sample \"Earth's Forces Are Causing This Massive Plate to Split in Two.\"");
-        println!("--train_path - Path to a training dataset (must be a csv)");
-        println!("--test_path - Path to a test dataset (must be a csv)");
+        println!("for example: knnzip --test-sample \"Earth's Forces Are Causing This Massive Plate to Split in Two.\"");
+        println!("--train-path - Path to a training dataset (must be a csv)");
+        println!("--test-path - Path to a test dataset (must be a csv)");
     }
+}
+
+fn predict_single(txt: &str, train_set: Arc<Vec<(i32, String)>>, batch_size: usize, k: usize) -> i32 {
+    let cx1 = compress(txt).len();
+    let distances_arc = Arc::new(Mutex::new(vec![]));
+    let mut handles = vec![];
+
+    for (i, batch) in train_set.chunks(batch_size).enumerate() {
+        let dist_arc_clone = Arc::clone(&distances_arc);
+        let train_set_arc_clone = Arc::clone(&train_set);
+        let start_idx = i * batch_size;
+        let end_idx = start_idx + batch.len();
+        let test_sample = txt.to_owned();
+
+        let handle = std::thread::spawn(move || {
+            for idx in start_idx..end_idx {
+                let train_sample = &train_set_arc_clone[idx];
+                let train_text = train_sample.1.clone();
+                let cx2 = compress(&train_text).len();
+                let combined = format!("{} {}", test_sample, train_text);
+                let cx1x2 = compress(&combined).len();
+                let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
+                let mut distances = dist_arc_clone.lock().unwrap();
+                distances.push((idx, ncd));
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("could not join thread");
+    }
+
+    let mut distances = distances_arc.lock().unwrap();
+    distances.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap());
+    let top_k_indices: Vec<usize> = distances.iter().take(k).map(|&(idx,_)|idx).collect();
+    let mut class_counts: HashMap<&i32, usize> = HashMap::new();
+    for &idx in &top_k_indices {
+        let class = &train_set[idx].0;
+        *class_counts.entry(class).or_insert(0) += 1;
+    }
+
+    let predict_class = class_counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1))
+        .map(|(class, _)| class);
+
+    predict_class.expect("no predicted class!").to_owned()
 }
 
 
@@ -109,63 +163,30 @@ fn main() {
     println!("args: {:?}", args);
     // NOTE: original labels are 1, 2, 3, 4
     let labels = ["World", "Sports", "Business", "Sci/Tech"];
-    let test_set = read_csv("data/ag_news/test.csv", None).expect("cannot load test set");
     let train_set = read_csv("data/ag_news/train.csv", Some(args.train_samples as usize)).expect("cannot load train set");
-    println!("number samples in test set {}", &test_set.len());
-    println!("number of samples in train set {}", &train_set.len());
-    println!("k: {}, num train samples: {}", args.k, args.train_samples);
-    println!("batch size: {}", args.batch_size);
+    let train_set_arc = Arc::new(train_set);
 
-    let cx1 = compress(&args.test_sample).len();
-    let train_set_shared = Arc::new(train_set);
-
-    let dist_shared = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
-    let mut handles = vec![];
-
-    let train_set_shared_outer = Arc::clone(&train_set_shared);
-
-    for (i, batch) in train_set_shared.chunks(args.batch_size).enumerate() {
-        let test_sample = args.test_sample.clone();
-        let dist_shared_clone = Arc::clone(&dist_shared);
-        let train_set_shared_clone = Arc::clone(&train_set_shared);
-
-        let start_idx = i * args.batch_size;
-        let end_idx = start_idx + batch.len();
-
-        let handle = std::thread::spawn(move || {
-            for idx in start_idx..end_idx {
-                let sample = &train_set_shared_clone[idx];
-                let train_text = sample.1.clone();
-                let cx2 = compress(&train_text).len();
-                let combined = format!("{} {}", test_sample, train_text);
-                let cx1x2 = compress(&combined).len();
-                let ncd = (cx1x2 as f64 - cx1.min(cx2) as f64) / cx1.max(cx2) as f64;
-                let mut dist = dist_shared_clone.lock().unwrap();
-                dist.push((idx, ncd))
+    if let Some(test_path) = args.test_path {
+        println!("eval mode");
+        let mut correct = 0;
+        let test_set = read_csv(&test_path, Some(args.num_test_samples)).expect("cannot load test set");
+        let num_samples = test_set.len();
+        for (i, sample) in test_set.iter().enumerate() {
+            let target_class = sample.0;
+            let train_set_arc_clone = Arc::clone(&train_set_arc);
+            let predicted_class = predict_single(&sample.1, train_set_arc_clone, args.batch_size, args.k);
+            if predicted_class == target_class {
+                correct += 1;
             }
-        });
-        handles.push(handle);
+            println!("{}/{} target class {}, predicted {}", i+1, num_samples, target_class, predicted_class);
+        }
+        println!("correct predictions: {}/{}", correct, num_samples);
+        println!("accuracy: {}", (correct as f64 / num_samples as f64));
+        return;
     }
+    println!("single prediction mode");
 
-    for handle in handles {
-        handle.join().expect("could not join thread");
-    }
-
-    let mut dist = dist_shared.lock().unwrap();
-    dist.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap());
-    let top_k_indices: Vec<usize> = dist.iter().take(args.k).map(|&(idx,_)|idx).collect();
-    let mut class_counts: HashMap<&i32, usize> = HashMap::new();
-    for &idx in &top_k_indices {
-        let class = &train_set_shared_outer[idx].0;
-        *class_counts.entry(class).or_insert(0) += 1;
-    }
-
-    let predict_class = class_counts
-        .into_iter()
-        .max_by(|a, b| a.1.cmp(&b.1))
-        .map(|(class, _)| class);
-    
-    let predict_class_idx = predict_class.expect("no predicted class!").to_owned() as usize;
-
-    println!("predicted class: {} (class idx {})", labels[predict_class_idx - 1], predict_class_idx);
+    let predicted_class = predict_single(&args.test_sample, train_set_arc, args.batch_size, args.k);
+    let predicted_class_idx = predicted_class - 1;
+    println!("predicted class: {} (class idx {})", labels[predicted_class_idx as usize], predicted_class);
 }
